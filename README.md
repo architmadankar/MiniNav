@@ -1,7 +1,8 @@
 # MiniNav
 
-A tiny Android Auto screen for your bike or car. MiniNav runs on the Waveshare ESP32-S3 2.8"
-touch display, connects to your phone over WiFi and shows Google Maps from Android Auto.
+A tiny Android Auto screen for your bike or car. MiniNav runs by default on the LCDWiki 2.8-inch
+ESP32-S3 Display, connects to your phone over WiFi and shows Google Maps from Android Auto.
+A Waveshare ESP32-S3-Touch-LCD-2.8 build profile is also available.
 No app on the phone, no Bluetooth, no extra hardware.
 
 **Step-by-step guide with diagrams: https://mininavdevice.github.io/MiniNav/**
@@ -21,12 +22,13 @@ H.264 map video and decodes it on the ESP32-S3.
 - Optional full screen: hides Android Auto's app bar so the map fills the display.
 - Optional touch: taps go to Android Auto (launcher, app lists).
 - Built-in demo drive that works without a phone.
-- Flips the picture when the board is turned over.
+- Auto-rotates on the Waveshare profile; the LCDWiki profile uses fixed landscape orientation.
 
 ## Hardware
 
 | Item | Notes |
 |---|---|
+| LCDWiki 2.8-inch ESP32-S3 Display (ES3C28P / ES3N28P) | ESP32-S3 N16R8, 16 MB flash, 8 MB PSRAM, 240x320 ILI9341V LCD, FT6336G capacitive touch (ES3C28P only), GPIO0 BOOT button. [Product and pinout](https://www.lcdwiki.com/2.8inch_ESP32-S3_Display) |
 | Waveshare ESP32-S3-Touch-LCD-2.8 | ESP32-S3R8, 16 MB flash, 8 MB PSRAM, 320x240 ST7789 LCD, CST3530 touch, QMI8658 IMU. [Buy on Robu.in](https://robu.in/product/waveshare-esp32-s3-2-8inch-capacitive-touch-display-development-board-240x320-ips-5-point-touch-32-bit-lx7-dual-core-processor-supports-wifi-bluetooth-esp32-with-display/) |
 | USB-C data cable | Flashing and power |
 | Android phone | Android Auto installed |
@@ -40,7 +42,9 @@ or `docs/index.html` from a clone, plug the board in and click **Install MiniNav
 
 ## Build from source
 
-Only needed to change WiFi names and passwords or other options.
+Only needed to change WiFi names and passwords or other options. The LCDWiki profile is the
+default; choose **MiniNav (Android Auto minimap) → Display board** in `idf.py menuconfig` to
+select the Waveshare profile.
 
 Needs [ESP-IDF v5.4.2](https://docs.espressif.com/projects/esp-idf/en/v5.4.2/esp32s3/get-started/).
 
@@ -81,6 +85,7 @@ Change names and passwords with `idf.py menuconfig` → *MiniNav (Android Auto m
 
 | Option | Default |
 |---|---|
+| Display board | LCDWiki 2.8-inch ESP32-S3 Display |
 | Access point name / password / channel | MiniNav / mininav123 / 6 |
 | Phone hotspot name / password | MiniNavHotspot / mininav123 |
 | Video density (bigger labels when higher) | 200 dpi |
@@ -97,7 +102,7 @@ Change names and passwords with `idf.py menuconfig` → *MiniNav (Android Auto m
 
 ```
 main/app_main.cpp   start-up, inputs, serial console
-main/board.cpp      display, connection screen, BOOT button, touch, IMU
+main/board.cpp      display, connection screen, BOOT button, touch, optional IMU
 main/net.cpp        WiFi (access point + phone hotspot)
 main/aap.cpp        Android Auto protocol: framing, TLS, channels, input
 main/video.cpp      H.264 decoder, crop and scale to the LCD

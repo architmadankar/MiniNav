@@ -1,5 +1,5 @@
-// Board layer: ST7789 LCD (LovyanGFX, same panel settings as the gta-minimap-demo), backlight,
-// BOOT button, QMI8658 accelerometer (auto-rotation), CST3530 touch and (for H.264 dumps) microSD.
+// Board layer: LCDWiki ILI9341/FT6336G by default, with a Waveshare ST7789/CST3530 profile.
+// The Waveshare board also has a QMI8658 accelerometer for auto-rotation.
 // One display task owns the LCD; everything else hands it frames or asks for a status redraw.
 #define LGFX_USE_V1
 #include <LovyanGFX.hpp>
@@ -21,9 +21,29 @@
 
 static const char *TAG = "board";
 
-// ---- pins (Waveshare ESP32-S3-Touch-LCD-2.8 demo code) ----------------------
+// ---- board wiring ---------------------------------------------------------------------------
+#if CONFIG_AAM_BOARD_LCDWIKI
+#define PIN_LCD_SCLK 12
+#define PIN_LCD_MOSI 11
+#define PIN_LCD_MISO 13
+#define PIN_LCD_CS 10
+#define PIN_LCD_DC 46
+#define PIN_LCD_RST -1
+#define PIN_LCD_BL 45
+#define PIN_BOOT 0
+#define PIN_SD_CLK 38
+#define PIN_SD_CMD 40
+#define PIN_SD_D0 39
+#define PIN_TP_SDA 16
+#define PIN_TP_SCL 15
+#define PIN_TP_INT 17
+#define PIN_TP_RST 18
+#define TP_ADDR 0x38      // FT6336G
+#define TP_I2C_PORT 0
+#else
 #define PIN_LCD_SCLK 40
 #define PIN_LCD_MOSI 45
+#define PIN_LCD_MISO -1
 #define PIN_LCD_CS 42
 #define PIN_LCD_DC 41
 #define PIN_LCD_RST 39
@@ -43,9 +63,16 @@ static const char *TAG = "board";
 #define TP_I2C_PORT 0
 #define TP_ADDR 0x58      // CST3530
 #define IMU_ROT_OFFSET 3  // quarter turns between accelerometer axes and panel (verified in the demo)
+#endif
+
+#if CONFIG_AAM_BOARD_LCDWIKI
+using display_panel_t = lgfx::Panel_ILI9341;
+#else
+using display_panel_t = lgfx::Panel_ST7789;
+#endif
 
 class LGFX : public lgfx::LGFX_Device {
-    lgfx::Panel_ST7789 _panel;
+    display_panel_t _panel;
     lgfx::Bus_SPI _bus;
     lgfx::Light_PWM _light;
 
@@ -54,14 +81,22 @@ public:
         auto b = _bus.config();
         b.spi_host = SPI3_HOST;
         b.spi_mode = 0;
+#if CONFIG_AAM_BOARD_LCDWIKI
+        b.freq_write = 40000000;
+#else
         b.freq_write = 80000000;
+#endif
         b.freq_read = 16000000;
+#if CONFIG_AAM_BOARD_LCDWIKI
+        b.spi_3wire = false;
+#else
         b.spi_3wire = true;
+#endif
         b.use_lock = true;
         b.dma_channel = SPI_DMA_CH_AUTO;
         b.pin_sclk = PIN_LCD_SCLK;
         b.pin_mosi = PIN_LCD_MOSI;
-        b.pin_miso = -1;
+        b.pin_miso = PIN_LCD_MISO;
         b.pin_dc = PIN_LCD_DC;
         _bus.config(b);
         _panel.setBus(&_bus);
@@ -74,9 +109,18 @@ public:
         p.panel_height = 320;
         p.offset_x = 0;
         p.offset_y = 0;
+#if CONFIG_AAM_BOARD_LCDWIKI
+        p.readable = true;
+        p.invert = true;  // The LCDWiki ILI9341 IPS panel needs inversion enabled for correct colors.
+#else
         p.readable = false;
         p.invert = true;
-        p.rgb_order = false;  // BGR panel
+#endif
+#if CONFIG_AAM_BOARD_LCDWIKI
+        p.rgb_order = false;
+#else
+        p.rgb_order = false;  // Waveshare ST7789 panel uses BGR order
+#endif
         p.dlen_16bit = false;
         p.bus_shared = false;
         _panel.config(p);
@@ -558,7 +602,10 @@ static void display_task(void *) {
     }
 }
 
-// ---- IMU: auto-rotation --------------------------------------
+// ---- IMU: auto-rotation ---------------------------------------------------------------------
+static uint32_t millis(void) { return (uint32_t)(esp_timer_get_time() / 1000); }
+
+#if CONFIG_AAM_BOARD_WAVESHARE
 static uint8_t imu_addr;
 static float gx, gy, gz;
 
@@ -585,8 +632,6 @@ static void imu_init(void) {
     imu_write(0x08, 0x01);  // CTRL7: accel on
     ESP_LOGI(TAG, "QMI8658 at 0x%02X", imu_addr);
 }
-
-static uint32_t millis(void) { return (uint32_t)(esp_timer_get_time() / 1000); }
 
 // Landscape rotation (1 or 3) for the current gravity, or -1 while flat, portrait or ambiguous.
 // The Android Auto picture is landscape, so portrait holds keep the last landscape rotation.
@@ -627,15 +672,24 @@ static void imu_poll(void) {
     g_app.rotation = r;
     if (s_display_task) xTaskNotifyGive(s_display_task);
 }
+#else
+static void imu_init(void) {
+    ESP_LOGI(TAG, "LCDWiki board has no IMU; using fixed landscape rotation");
+}
 
-// ---- CST3530 touch -> Android Auto taps and drags --------------------------------------
-// This board's touch chip is a Hynitron CST3530 at I2C 0x58 with 32-bit register addresses (not
-// the CST328 at 0x1A that Waveshare's code expects). Protocol from the CST353X Linux driver in
-// gl-inet/gl-openwrt (package/kernel/cst353x): write D0070000, read 9 bytes ([0..1] checksum =
-// 0x55 + bytes 4..8; byte 8 high nibble 1 = down, 2 = held, 0 = up; x/y 12-bit in 4, 5, 7), then
-// write D00002AB to end the frame.
+static void imu_poll(void) {}
+#endif
+
+// ---- touch -> Android Auto taps and drags ----------------------------------------------------
 static bool s_tp_ok;
 
+#if CONFIG_AAM_BOARD_LCDWIKI
+static bool ft6336_frame(uint8_t *raw) {
+    static const uint8_t reg = 0x02;  // TD_STATUS, followed by the first touch point
+    return lgfx::i2c::transactionWriteRead(TP_I2C_PORT, TP_ADDR, &reg, 1, raw, 5, 400000).has_value();
+}
+#else
+// CST3530 uses 32-bit register addresses: fetch frame D0070000, then acknowledge D00002AB.
 static bool cst3530_frame(uint8_t *raw, bool *acked = nullptr) {
     static const uint8_t reg[4] = { 0xD0, 0x07, 0x00, 0x00 };
     static const uint8_t end[4] = { 0xD0, 0x00, 0x02, 0xAB };
@@ -646,8 +700,37 @@ static bool cst3530_frame(uint8_t *raw, bool *acked = nullptr) {
     uint16_t sum = 0x55 + raw[4] + raw[5] + raw[6] + raw[7] + raw[8];
     return (raw[0] | (raw[1] << 8)) == sum;
 }
+#endif
 
 static void touch_init(void) {
+#if CONFIG_AAM_BOARD_LCDWIKI
+    if (!lgfx::i2c::init(TP_I2C_PORT, PIN_TP_SDA, PIN_TP_SCL).has_value()) {
+        ESP_LOGE(TAG, "FT6336G I2C bus initialization failed on port %d", TP_I2C_PORT);
+        return;
+    }
+    gpio_config_t io = {};
+    io.pin_bit_mask = 1ULL << PIN_TP_RST;
+    io.mode = GPIO_MODE_OUTPUT;
+    ESP_ERROR_CHECK(gpio_config(&io));
+    esp_err_t err = gpio_set_level((gpio_num_t)PIN_TP_RST, 0);
+    if (err != ESP_OK) ESP_LOGE(TAG, "touch reset low failed: %s", esp_err_to_name(err));
+    vTaskDelay(pdMS_TO_TICKS(10));
+    err = gpio_set_level((gpio_num_t)PIN_TP_RST, 1);
+    if (err != ESP_OK) ESP_LOGE(TAG, "touch reset release failed: %s", esp_err_to_name(err));
+    vTaskDelay(pdMS_TO_TICKS(100));
+    uint8_t raw[5] = {};
+    for (int i = 0; i < 5 && !s_tp_ok; i++) {
+        s_tp_ok = ft6336_frame(raw);
+        if (!s_tp_ok) vTaskDelay(pdMS_TO_TICKS(20));
+    }
+    if (s_tp_ok) {
+        ESP_LOGI(TAG, "FT6336G responded on I2C%d SDA=%d SCL=%d addr=0x%02X status=0x%02X",
+                 TP_I2C_PORT, PIN_TP_SDA, PIN_TP_SCL, TP_ADDR, raw[0]);
+    } else {
+        ESP_LOGW(TAG, "no FT6336G response on I2C%d SDA=%d SCL=%d addr=0x%02X",
+                 TP_I2C_PORT, PIN_TP_SDA, PIN_TP_SCL, TP_ADDR);
+    }
+#else
     gpio_config_t io = {};
     io.pin_bit_mask = 1ULL << PIN_TP_INT;
     io.mode = GPIO_MODE_INPUT;
@@ -666,6 +749,7 @@ static void touch_init(void) {
     }
     if (s_tp_ok) ESP_LOGI(TAG, "touch CST3530 found");
     else ESP_LOGW(TAG, "touch controller not found");
+#endif
 }
 
 // Raw touch is in the panel's portrait frame (240x320); map it to the current rotation.
@@ -679,12 +763,13 @@ static void touch_to_screen(int rx, int ry, int rot, int &x, int &y) {
     }
 }
 
-// Reads only while the chip pulls INT low, as the Linux driver does: polling and acknowledging the
-// frame register restarts the chip's contact tracking and turns a drag into a string of taps.
 // The status screen is always touchable (its setting buttons); Android Auto gets touches only while
 // video is up and the Touch setting is on.
 static void touch_poll(void) {
-    static uint32_t t_move, t_last;
+    static uint32_t t_move;
+#if CONFIG_AAM_BOARD_WAVESHARE
+    static uint32_t t_last;
+#endif
     static bool down, ui_down;
     static int ax, ay;
     if (!s_tp_ok) return;
@@ -693,6 +778,7 @@ static void touch_poll(void) {
     if (!to_aa && down) { down = false; aap_send_touch(1, ax, ay); }
     if (video && !to_aa) return;
     uint32_t now = millis();
+#if CONFIG_AAM_BOARD_WAVESHARE
     if (gpio_get_level((gpio_num_t)PIN_TP_INT) != 0) {
         if (down && now - t_last > 300) { down = false; aap_send_touch(1, ax, ay); }  // lost the lift
         if (now - t_last > 300) ui_down = false;
@@ -701,14 +787,33 @@ static void touch_poll(void) {
     uint8_t raw[9];
     if (!cst3530_frame(raw)) return;
     int ev = raw[8] >> 4;
-    t_last = now;
-    int lx = 0, ly = 0;
     bool pressed = ev == 1 || ev == 2;
+    int rx = raw[4] + ((raw[7] & 0x0F) << 8);
+    int ry = raw[5] + ((raw[7] & 0xF0) << 4);
+    t_last = now;
+#else
+    uint8_t raw[5];
+    if (!ft6336_frame(raw)) return;
+    bool pressed = (raw[0] & 0x0F) != 0;
+    int rx = ((raw[1] & 0x0F) << 8) | raw[2];
+    int ry = ((raw[3] & 0x0F) << 8) | raw[4];
     if (pressed) {
-        int rx = raw[4] + ((raw[7] & 0x0F) << 8);
-        int ry = raw[5] + ((raw[7] & 0xF0) << 4);
+        static uint32_t t_log;
+        if (now - t_log >= 500) {
+            ESP_LOGI(TAG, "FT6336G touch raw x=%d y=%d", rx, ry);
+            t_log = now;
+        }
+    }
+#endif
+    int lx = 0, ly = 0;
+    if (pressed) {
         if (rx >= 240 || ry >= 320) return;
         touch_to_screen(rx, ry, g_app.rotation, lx, ly);
+#if CONFIG_AAM_BOARD_LCDWIKI
+        // The FT6336 reports the opposite diagonal from this panel's landscape orientation.
+        lx = LCD_W - 1 - lx;
+        ly = LCD_H - 1 - ly;
+#endif
     }
     if (!video) {  // status screen: one action per finger press
         if (pressed && !ui_down) { ui_down = true; status_tap(lx, ly); }
@@ -769,8 +874,10 @@ static bool s_sd;
 bool sd_ready(void) { return s_sd; }
 
 static void sd_init(void) {
+#if CONFIG_AAM_BOARD_WAVESHARE
     gpio_set_direction((gpio_num_t)PIN_SD_D3, GPIO_MODE_OUTPUT);
     gpio_set_level((gpio_num_t)PIN_SD_D3, 1);
+#endif
     esp_vfs_fat_sdmmc_mount_config_t mount = {};
     mount.format_if_mount_failed = false;
     mount.max_files = 4;

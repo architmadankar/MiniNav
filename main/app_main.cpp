@@ -1,5 +1,5 @@
-// MiniNav: Waveshare ESP32-S3 2.8" board as a WiFi Android Auto head unit that shows the
-// Google Maps projection. See README.md for the phone setup.
+// MiniNav: ESP32-S3 display board as a WiFi Android Auto head unit showing the Google Maps
+// projection. See README.md for board selection and phone setup.
 #include <stdio.h>
 #include <stdarg.h>
 #include <string.h>

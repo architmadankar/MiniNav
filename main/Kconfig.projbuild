@@ -1,5 +1,16 @@
 menu "MiniNav (Android Auto minimap)"
 
+    choice AAM_BOARD
+        prompt "Display board"
+        default AAM_BOARD_LCDWIKI
+
+        config AAM_BOARD_LCDWIKI
+            bool "LCDWiki 2.8-inch ESP32-S3 Display (ES3C28P/ES3N28P)"
+
+        config AAM_BOARD_WAVESHARE
+            bool "Waveshare ESP32-S3-Touch-LCD-2.8"
+    endchoice
+
     config AAM_AP_SSID
         string "WiFi access point name"
         default "MiniNav"
